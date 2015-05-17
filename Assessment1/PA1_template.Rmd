@@ -1,0 +1,69 @@
+---
+Peer Assessment 1  
+Activity Monitoring Data Analysis
+---
+#Peer Assessment 1
+##Activity Monitoring Data Analysis
+
+The activity monitoring data is loaded as an R dataset. The dataset includes the number of steps, date, and interval for each activity.
+```{r opendata}
+data <- read.csv("activity.csv")
+originaldata <- data
+drop <- is.na(data$steps)
+data <- data[!drop,]
+data$date <- as.Date(data$date)
+originaldata$date<-as.Date(originaldata$date)
+```
+
+1) Calculate the total number of steps taken per day
+```{r stepscalc}
+library(dplyr)
+data<-group_by(data,date)
+numsteps <- summarise(data,totalsteps = sum(steps))
+```
+
+2) Create a histogram of the total number of steps per activity.
+```{r stephist}
+hist(numsteps$totalsteps,main="Total Steps per Activity",xlab ="Number of Steps")
+
+```
+
+3) The mean and median of the total number of steps taken per day are
+```{r stepssum}
+summarysteps <- summarise(data,meansteps = mean(steps),mediansteps=median(steps))
+as.data.frame(summarysteps)
+```
+
+The average daily activity pattern of the 5-minute interval and the steps are determined and plotted as a time series.
+```{r intervalcalc}
+data<-ungroup(data)
+data<-group_by(data,interval)
+intercalc <- summarise(data,meansteps = mean(steps))
+plot(intercalc$interval,intercalc$meansteps,type="l",main="Average Daily Activity Pattern",xlab="5 minute interval",ylab="Average Number of Steps")
+```
+
+The maximum average number of steps is found on the 5 minute interval.
+```{r maxsteps}
+intercalc2 <- arrange(intercalc,desc(meansteps))
+intercalc2 <- head(intercalc2,1)
+max<-intercalc2$interval
+```
+
+The interval with the maximum number of steps is `r max`.
+
+The total number of missing data in the dataset is determined.
+```{r navalues}
+numna <- sum(drop)
+```
+The total number of missing data in the dataset is `r numna`.
+
+For days with missing data, the missing data is replaced with the average number of steps at that interval taken over the entire number of days in the sample set.
+```{r replace}
+newdata <- originaldata
+mergedata<- merge(newdata,intercalc,by="interval",all.x=T)
+drop <- is.na(mergedata$steps)
+mergedata <- mutate(mergedata[drop,],steps=meansteps)
+mergedata <- group_by(mergedata,date)
+alldata <- summarise(mergedata,totalsteps=sum(steps),mean2=mean(steps),median=median(steps))
+```
+
