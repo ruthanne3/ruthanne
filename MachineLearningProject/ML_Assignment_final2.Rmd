@@ -1,0 +1,152 @@
+---
+title: "Assessment of Exercise Activity Capability"
+author: "Ruth Anne Lambert"
+date: "Friday, February 12, 2016"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(rattle)
+library(gbm)
+library(gam)
+```
+### Summary
+
+The objective of this project is to assess how "well" a person conducted a specific exercise while being fitted with an activity monitoring device such as a fitbit or another electronic device.   Sample readings were taken at different time intervals while the participant engaged in the activity.  The monitoring devices were placed on the participants arm, forearm, belt, and dumbbell.  Each participant executed the activity correctly and then repeated the same activity incorrectly four different times.  The motions were asigned a rating of either "A","B","C","D" or "E" depending on the motion executed. The activity dataset was obtained from  <http://groupware.les.inf.puc-rio.br/har>. The data was split into training, testing and validation sets.  Three different prediction models were developed and the most accurate model was applied to the validation set. In this project the random forest model with boosting gave the highest accuracy in the training/test phase leading to an accuracy of $0.915$ in the validation step.
+```{r obtain_data, include=FALSE}
+filetrain <- "pml-training.csv"
+filetest <- "pml-testing.csv"
+training_set <- read.csv(filetrain, na.strings=c("","NA"),stringsAsFactors=F)
+testing_set <- read.csv(filetest, na.strings=c("","NA"),stringsAsFactors=F)
+training_set$user_name <- as.factor(training_set$user_name)
+testing_set$user_name <- as.factor(testing_set$user_name)
+training_set$classe <- as.factor(training_set$classe)
+```
+### Data Partitioning
+
+The original training dataset obtained from the website was sliced into training, testing, and validation sets with a partition of $64$%, $16$%, and $20$% respectively. Since the random forest method with boot strapping and the tree method with boosting take a considerable amount of time to compile using large datasets, a smaller training data set was created in order to create these models.
+```{r partition, include = FALSE}
+y <- training_set$X
+##create a validation data set from the original training data
+set.seed(125)
+intrain <- createDataPartition(y,p=0.8,list=FALSE)
+traintest <- training_set[intrain,]
+validation <- training_set[-intrain,]
+validation <- group_by(validation,X)
+validation <- arrange(validation,X)
+##create a training and test set to choose the predictor variables
+y <- traintest$X
+set.seed(127)
+intrain <- createDataPartition(y,p=0.8,list=FALSE)
+training <- traintest[intrain,]
+testing <-  traintest[-intrain,]
+training <- group_by(training,X)
+training <- arrange(training,X)
+testing <- group_by(testing,X)
+testing <- arrange(testing,X)
+## Since the training set is too large, create a smaller training set
+y <- training$X
+set.seed(129)
+intrain <- createDataPartition(y,p=0.08,list=FALSE)
+smalltrain <- training[intrain,]
+```
+
+### Selecting Predictors
+
+The activity dataset contains $160$ variables, $152$ of which are actual measurements from the electronic devices.  Of these measurements, $100$ variables are only measured at new time "windows" and have values of "NA" during the remaining time intervals. These variables are not used in the analysis while the $52$ measurements with continuous data are used as the model predictors.  A plot of the training data is shown in Figure 1 for two types of measurements.  The figure shows clusters in the data according to the classe activity rating.
+```{r choose_predictors, echo = FALSE}
+## Check for column variables with NA or DIV/0 values, do not use these as predictors ##
+naval_train <- is.na(training)
+predict_train <- !(colSums(naval_train)>0|grepl("DIV/0",training))
+predict_train[c(1:7)] <- FALSE
+rm(naval_train)
+
+qplot(pitch_forearm,roll_belt,colour=classe,data=smalltrain)
+```
+
+### Model Development
+
+Since the outcome of the data is an activity "classifier", and the data clearly exhibits clustering, prediction models that work well with clustering and classifiers are used. The three different models considered are:
+
+* Random forest with bootstrapping
+
+* Trees with boosting
+
+* The Bayes method
+
+The random tree and boosting methods are created using the smaller training data set while the Bayesian model is created using the larger training dataset.  The accuracy of each model is determined using the full training set and is shown in Table 1.  From the table it is evident that the random forest model with bootstrapping has the highest accuracy. The details of this random forest model are shown in Table 2.
+
+```{r models, include=FALSE, cache=TRUE}
+## Predicting with Trees and Bayesian models
+set.seed(346)
+modfit_bayes <- train(classe ~ . , method="lda", data = training[,predict_train])
+set.seed(348)
+modfit_boost <- train(classe ~ . , method="gbm", verbose=F, data = smalltrain[,predict_train])
+set.seed(350)
+modfit_rf <- train(classe ~ . , method="rf", prox=TRUE, data = smalltrain[,predict_train])
+
+## Calculate the accuracy of each prediction model
+predict_rf <-    predict(modfit_rf,training[,predict_train])
+predict_boost <- predict(modfit_boost,training[,predict_train])
+predict_bayes <- predict(modfit_bayes,training[,predict_train])
+
+original <- training$classe
+
+rf_acc <- confusionMatrix(predict_rf,original)
+rf <- rf_acc$overall[1]
+boost_acc <- confusionMatrix(predict_boost,original)
+boost <- boost_acc$overall[1]
+bayes_acc <- confusionMatrix(predict_bayes,original)
+bayes <- bayes_acc$overall[1]
+accuracy <- data.frame(rf,boost,bayes)
+```
+```{r tables, echo=F}
+accuracy
+modfit_rf
+```
+
+### Model Selection and Validation
+
+The three different models are applied to the test set, whose size is $16$% of the original data set. The purpose of applying the three prediction models to the test set, is to determine how they perform on data which was not used to create each model.  The model with the highest accuracy is chosen for the next step, model validation.  The accuracy of each model applied to the test set is shown in Table 3.  The results show that the prediction accuracy of each model on the test set is slightly less than the accuracy using the training set.  the random forest model achieves the highest accuracy of the three models and is selected as the final model.
+
+```{r model_selection, echo=FALSE, message=FALSE}
+pred1 <- predict(modfit_rf,testing[,predict_train])
+pred2 <- predict(modfit_boost,testing[,predict_train])
+pred3 <- predict(modfit_bayes,testing[,predict_train])
+original <- testing$classe
+
+rf_acc <- confusionMatrix(pred1,original)
+rf <- rf_acc$overall[1]
+boost_acc <- confusionMatrix(pred2,original)
+boost <- boost_acc$overall[1]
+bayes_acc <- confusionMatrix(pred3,original)
+bayes <- bayes_acc$overall[1]
+accuracy_test <- data.frame(rf,boost,bayes)
+accuracy_test
+```
+
+The top four predictors of the random forest model are: 1) "roll_belt", 2) "pitch_forearm", 3) "magnet_dumbbell_z", and 4) "magnet_dumbbell_y".  The random forest model is applied to the validation data set, which is $20$% of the original training data set and the results are shown in Table 4. A plot of the validation data set with each data point identified as correctly predicted and incorrectly predicted is shown in Figure 2.
+
+```{r model_validation, echo=FALSE, message=FALSE}
+prediction <- predict(modfit_rf,validation[,predict_train])
+original <- validation$classe
+Val1 <- confusionMatrix(prediction,original)
+final.model <- Val1$overall[1]
+accuracy_validation <- data.frame(final.model)
+accuracy_validation
+
+valid <- validation
+valid$predright <- prediction == validation$classe
+qplot(magnet_dumbbell_y,roll_belt,colour=predright,data=valid,main="Validation Predictions")
+```
+
+As a final test, the random forest model with bootstrapping outlined in this project will be used to identify the activity "classe" of $20$ measurements whose "classe" is unknown.
+
+
+
+
